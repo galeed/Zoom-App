@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zoom Video SDK - App de Prueba Alternativa</title>
+    <script src="https://jsdelivr.net"></script>
+    <script src="https://cloudflare.com"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+        .container { max-width: 800px; width: 100%; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h2 { color: #2d8cff; text-align: center; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; font-weight: bold; margin-bottom: 5px; color: #333; }
+        input, select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button { background-color: #2d8cff; color: white; border: none; padding: 12px 20px; font-size: 16px; border-radius: 4px; cursor: pointer; width: 100%; margin-top: 10px; font-weight: bold; }
+        button:hover { background-color: #1a73e8; }
+        #video-container { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px; background: #000; min-height: 400px; border-radius: 8px; overflow: hidden; padding: 10px; }
+        video-canvas-container { width: 100%; height: 100%; min-height: 200px; background: #222; border-radius: 4px; }
+        .controls { display: flex; gap: 10px; margin-top: 15px; justify-content: center; }
+        .btn-control { background-color: #333; width: auto; padding: 10px 20px; }
+        .btn-danger { background-color: #ea4335; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Zoom Video SDK - Panel de Control Alternativo</h2>
+    
+    <!-- Formulario de Configuración y Login Fake -->
+    <div id="setup-panel">
+        <div class="form-group">
+            <label>SDK Key (De Zoom Developer Console):</label>
+            <input type="text" id="sdk-key" placeholder="Ingresa tu SDK Key">
+        </div>
+        <div class="form-group">
+            <label>SDK Secret (¡Solo para pruebas locales!):</label>
+            <input type="password" id="sdk-secret" placeholder="Ingresa tu SDK Secret">
+        </div>
+        <hr>
+        <div class="form-group">
+            <label>Nombre de Usuario (Para la sesión):</label>
+            <input type="text" id="username" value="Anfitrión de Prueba">
+        </div>
+        <div class="form-group">
+            <label>Nombre de la Sala de Videoconferencia:</label>
+            <input type="text" id="session-name" value="sala-alternativa-1">
+        </div>
+        <div class="form-group">
+            <label>Rol:</label>
+            <select id="role">
+                <option value="1">Anfitrión (Host - Crea la sala)</option>
+                <option value="0">Participante (Invitado)</option>
+            </select>
+        </div>
+        <button id="btn-join">Iniciar / Unirse a la Videoconferencia</button>
+    </div>
+
+    <!-- Área de Videoconferencia Activa -->
+    <div id="conference-panel" class="hidden">
+        <h3 id="room-title" style="text-align: center;">Conectado a la sala</h3>
+        
+        <div id="video-container">
+            <!-- El SDK de Zoom renderizará los videos usando elementos canvas dedicados aquí -->
+        </div>
+
+        <div class="controls">
+            <button id="btn-toggle-video" class="btn-control">Encender Cámara</button>
+            <button id="btn-toggle-audio" class="btn-control">Activar Micrófono</button>
+            <button id="btn-leave" class="btn-control btn-danger">Salir de la Conferencia</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Inicialización del cliente de Zoom Video SDK
+    const client = ZoomVideo.createClient();
+    let sessionCanvas;
+    let stream;
+    let isVideoOn = false;
+    let isAudioOn = false;
+
+    // Función auxiliar: Generación del JWT obligatorio que requiere Zoom usando Base64 Interno
+    // NOTA: En producción, este token SIEMPRE debe generarse en tu backend (Node.js/Python) para no exponer tu SDK Secret.
+    function generateSignature(sdkKey, sdkSecret, sessionName, role, username) {
+        const iat = Math.round(new Date().getTime() / 1000) - 30;
+        const exp = iat + 60 * 60 * 2; // Válido por 2 horas
+        const oHeader = { alg: 'HS256', typ: 'JWT' };
+        const oPayload = {
+            app_key: sdkKey,
+            tpc: sessionName,
+            role_type: parseInt(role),
+            user_identity: username,
+            version: 1,
+            iat: iat,
+            exp: exp
+        };
+        return KJUR.jws.JWS.sign('HS256', JSON.stringify(oHeader), JSON.stringify(oPayload), sdkSecret);
+    }
+
+    // Evento Principal: Conectarse a la conferencia
+    document.getElementById('btn-join').addEventListener('click', async () => {
+        const sdkKey = document.getElementById('sdk-key').value;
+        const sdkSecret = document.getElementById('sdk-secret').value;
+        const sessionName = document.getElementById('session-name').value;
+        const username = document.getElementById('username').value;
+        const role = document.getElementById('role').value;
+
+        if (!sdkKey || !sdkSecret || !sessionName || !username) {
+            alert('Por favor, completa todos los campos de configuración corporativa.');
+            return;
+        }
+
+        try {
+            // 1. Inicializar el SDK Web
+            await client.init('en-US', 'CDN');
+
+            // 2. Generar la firma segura (Aquí es donde se aplica la lógica JWT / Base64 de fondo)
+            const token = generateSignature(sdkKey, sdkSecret, sessionName, role, username);
+
+            // 3. Unirse a la sesión de video de Zoom
+            await client.join(sessionName, token, username);
+            stream = client.getMediaStream();
+
+            // Alternar paneles de interfaz gráfica
+            document.getElementById('setup-panel').classList.add('hidden');
+            document.getElementById('conference-panel').classList.remove('hidden');
+            document.getElementById('room-title').innerText = `Sala: ${sessionName} | Usuario: ${username}`;
+
+            // 4. Preparar lienzo de video
+            const videoContainer = document.getElementById('video-container');
+            // El Video SDK de Zoom requiere adjuntar un canvas especial para procesar el flujo de video web
+            if(typeof stream.attachVideoCanvas === 'function') {
+                // Estructura necesaria para versiones recientes del Video SDK
+                const canvas = document.createElement('video-canvas-container');
+                videoContainer.appendChild(canvas);
+            }
+
+        } catch (error) {
+            console.error('Error al iniciar la videoconferencia de prueba:', error);
+            alert('Error de conexión. Revisa tus credenciales de Zoom SDK e intenta de nuevo.');
+        }
+    });
+
+    // Control de Cámara (Video)
+    document.getElementById('btn-toggle-video').addEventListener('click', async () => {
+        if (!isVideoOn) {
+            await stream.startVideo();
+            // Renderizar el video del usuario local en la pantalla
+            await stream.renderVideo(document.getElementById('video-container'), client.getCurrentUserInfo().userId, 300, 200, 0, 0, 3);
+            document.getElementById('btn-toggle-video').innerText = "Apagar Cámara";
+            isVideoOn = true;
+        } else {
+            await stream.stopVideo();
+            await stream.stopRenderVideo(document.getElementById('video-container'), client.getCurrentUserInfo().userId);
+            document.getElementById('btn-toggle-video').innerText = "Encender Cámara";
+            isVideoOn = false;
+        }
+    });
+
+    // Control de Micrófono (Audio)
+    document.getElementById('btn-toggle-audio').addEventListener('click', async () => {
+        if (!isAudioOn) {
+            await stream.startAudio();
+            document.getElementById('btn-toggle-audio').innerText = "Mutear Micrófono";
+            isAudioOn = true;
+        } else {
+            await stream.stopAudio();
+            document.getElementById('btn-toggle-audio').innerText = "Activar Micrófono";
+            isAudioOn = false;
+        }
+    });
+
+    // Evento para colgar/abandonar
+    document.getElementById('btn-leave').addEventListener('click', async () => {
+        await client.leave();
+        window.location.reload(); // Recarga la pestaña para limpiar el estado de pruebas
+    });
+</script>
+</body>
+</html>
